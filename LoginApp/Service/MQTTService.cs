@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using MQTT;
+using LoginApp; // Để dùng SensorDataEventArgs
 
 namespace LoginApp.Service
 {
@@ -9,7 +10,7 @@ namespace LoginApp.Service
         private readonly MQTTDeviceClient client;
 
         // Sự kiện truyền dữ liệu cảm biến: nhiệt độ, độ ẩm, mực nước
-        public event Action<double, double, double>? OnSensorDataReceived;
+        public event EventHandler<SensorDataEventArgs>? SensorDataReceived;
         public event Action<string>? OnError;
 
         public bool IsConnected { get; private set; } = false;
@@ -21,7 +22,7 @@ namespace LoginApp.Service
             string clientId = "maui-client")
         {
             // Kênh cảm biến: "UserId/Sensor"
-            string topic = $"{userId}/Sensor";
+            string topic = $"{Globals.GlobalUserId}/Sensor";
 
             client = new MQTTDeviceClient(
                 brokerAddress: brokerAddress,
@@ -30,9 +31,15 @@ namespace LoginApp.Service
                 clientId: clientId
             );
 
+            // Khi có dữ liệu cảm biến từ MQTT, raise event cho UI
             client.OnSensorDataReceived += (temp, hum, waterlevel) =>
             {
-                OnSensorDataReceived?.Invoke(temp, hum, waterlevel);
+                SensorDataReceived?.Invoke(this, new SensorDataEventArgs
+                {
+                    Temperature = temp,
+                    Humidity = hum,
+                    WaterLevel = waterlevel
+                });
             };
         }
 
