@@ -1,102 +1,79 @@
-﻿using System;
+using System;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
 using Microsoft.Maui.Controls;
-using Microsoft.Maui.Dispatching;
-using LoginApp.Service;
 
 namespace LoginApp
 {
     public partial class MainPage : ContentPage
     {
-        private readonly MQTTService mqttService;
-        private readonly MQTTControlService relayService;
-        private bool relayOn = false;
+        private MQTTService _mqttService;
 
         public MainPage()
         {
             InitializeComponent();
-
-            mqttService = new MQTTService();
-            mqttService.OnSensorDataReceived += OnSensorDataReceived;
-            mqttService.OnError += OnMQTTError;
-
-            // Khởi tạo service điều khiển relay
-            relayService = new MQTTControlService();
-
-            ConnectToMQTT();
-            ConnectToRelay();
+            InitMqtt();
         }
 
-        private async void ConnectToMQTT()
+        private void InitMqtt()
         {
-            try
-            {
-                await mqttService.StartAsync();
-            }
-            catch (Exception ex)
-            {
-                await DisplayAlert("Lỗi kết nối", $"Không thể kết nối MQTT: {ex.Message}", "OK");
-            }
+            // Giả sử GlobalUserId được gán sau khi đăng nhập thành công
+            _mqttService = new MQTTService(GlobalUserId);
+            _mqttService.SensorDataReceived += MqttService_SensorDataReceived;
+            _mqttService.Connect(); // Hoặc Start, tuỳ vào code của bạn
         }
 
-        // Kết nối relay service nếu cần thiết (thường dùng chung broker, có thể chỉ dùng 1 kết nối nếu broker/topic giống nhau)
-        private async void ConnectToRelay()
+        private async void MqttService_SensorDataReceived(object sender, SensorDataEventArgs e)
         {
-            try
-            {
-                await relayService.StartAsync();
-            }
-            catch (Exception ex)
-            {
-                await DisplayAlert("Lỗi kết nối", $"Không thể kết nối MQTT (relay): {ex.Message}", "OK");
-            }
-        }
-
-        private void OnSensorDataReceived(double temp, double hum)
-        {
+            // Cập nhật UI
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                TemperatureLabel.Text = $"{temp:F1}";
-                HumidityLabel.Text = $"{hum:F1}%";
+                TemperatureLabel.Text = e.Temperature.HasValue ? e.Temperature.Value.ToString("F1") : "--";
+                HumidityLabel.Text = e.Humidity.HasValue ? e.Humidity.Value.ToString("F1") : "--";
+                WaterLevelLabel.Text = e.WaterLevel.HasValue ? e.WaterLevel.Value.ToString("F2") : "--";
             });
+
+            // Gửi dữ liệu SensorData lên server
+            await PostSensorDataToServer(e);
         }
 
-        private void OnMQTTError(string message)
+        private async Task PostSensorDataToServer(SensorDataEventArgs sensor)
         {
-            MainThread.BeginInvokeOnMainThread(async () =>
-            {
-                await DisplayAlert("Lỗi MQTT", message, "OK");
-            });
-        }
-
-        // Xử lý nút điều khiển relay
-        private async void RelayToggleButton_Click(object sender, EventArgs e)
-        {
-            relayOn = !relayOn;
-            RelayToggleButton.Text = relayOn ? "Tắt Relay" : "Bật Relay";
-            RelayToggleButton.BackgroundColor = relayOn ? Colors.OrangeRed : Colors.LightGreen;
-
             try
             {
-                await relayService.SendRelayCommandAsync(relayOn);
+                var httpClient = new HttpClient();
+                var sensorData = new
+                {
+                    UserId = GlobalUserId,
+                    Temperature = sensor.Temperature,
+                    Humidity = sensor.Humidity,
+                    WaterLevel = sensor.WaterLevel,
+                    Time = DateTime.UtcNow
+                };
+
+                // Chỉnh lại base URL cho đúng server của bạn!
+                var response = await httpClient.PostAsJsonAsync("https://your-server-url/api/SensorData", sensorData);
+                response.EnsureSuccessStatusCode();
             }
             catch (Exception ex)
             {
-                await DisplayAlert("Lỗi relay", ex.Message, "OK");
+                // Có thể log lỗi hoặc hiển thị thông báo nếu cần
             }
         }
+    }
 
-        protected override async void OnDisappearing()
-        {
-            base.OnDisappearing();
+    // Bạn cần bổ sung/global biến này ở đâu đó:
+    public static class Globals
+    {
+        public static string GlobalUserId = ""; // Gán khi đăng nhập thành công!
+    }
 
-            if (mqttService != null && mqttService.IsConnected)
-            {
-                await mqttService.StopAsync();
-            }
-            if (relayService != null && relayService.IsConnected)
-            {
-                await relayService.StopAsync();
-            }
-        }
+    // Định nghĩa EventArgs nếu file MQTTService của bạn chưa có:
+    public class SensorDataEventArgs : EventArgs
+    {
+        public double? Temperature { get; set; }
+        public double? Humidity { get; set; }
+        public double? WaterLevel { get; set; }
     }
 }
